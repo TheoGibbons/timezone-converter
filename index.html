@@ -237,6 +237,7 @@
             if ($('#ago-holder').length === 0) {
               $('#timezoneholder').append(`
 <div class="single-holder" id="ago-holder" data-timezone="ago">
+    <span class="reorder-btn">≡</span>
     <span class="delete-btn">&times;</span>
     <label for="ago">Time Difference: <span class="datetime-pretty"></span></label>
     <span id="ago">-</span>
@@ -248,6 +249,7 @@
             if ($('#unix-holder').length === 0) {
               $('#timezoneholder').append(`
 <div class="single-holder" id="unix-holder" data-timezone="unix">
+    <span class="reorder-btn">≡</span>
     <span class="delete-btn">&times;</span>
     <label for="unix">Unix Timestamp: <span class="datetime-pretty"></span></label>
     <input type="text" id="unix" class="timezone" placeholder="Enter Unix timestamp">
@@ -259,6 +261,7 @@
             const selctor = timezone.replace(/[^a-zA-Z0-9]/g, '');
             $('#timezoneholder').append(`
 <div class="single-holder" data-timezone="${timezone}">
+    <span class="reorder-btn">≡</span>
     <span class="delete-btn">&times;</span>
     <label for="${selctor}">${timezone}: <span class="datetime-pretty"></span></label>
     <input type="datetime-local" id="${selctor}" data-timezone="${timezone}" class="timezone">
@@ -278,11 +281,105 @@
           saveTimeZones();
         });
 
-        // Make timezone holders sortable (drag and drop)
-        $('#timezoneholder').sortable({
-          update: function(event, ui) {
+        // Make reorder buttons draggable
+        $('#timezoneholder').on('mousedown', '.reorder-btn', function(event) {
+          event.preventDefault();
+
+          const currentHolder = $(this).closest('.single-holder');
+          currentHolder.addClass('dragging');
+
+          const startY = event.pageY;
+          const startTop = currentHolder.position().top;
+          const holderHeight = currentHolder.outerHeight();
+
+          // Create placeholders for visual feedback
+          const placeholder = $('<div class="placeholder"></div>').css({
+            height: holderHeight,
+            marginBottom: '10px'
+          });
+          currentHolder.after(placeholder);
+
+          // Set dragging styles
+          currentHolder.css({
+            position: 'absolute',
+            zIndex: 1000,
+            width: currentHolder.width(),
+            top: startTop,
+            left: currentHolder.position().left
+          });
+
+          // Handle mouse movement
+          $(document).on('mousemove.reorder', function(e) {
+            const deltaY = e.pageY - startY;
+            currentHolder.css('top', startTop + deltaY);
+
+            // Get current mouse position
+            const currentMouseY = e.pageY;
+
+            // Find the best position for the placeholder based on mouse position
+            const holders = $('.single-holder').not('.dragging');
+            let bestPosition = null;
+            let bestHolder = null;
+            let insertBefore = true;
+
+            // Find the holder closest to the current mouse position
+            holders.each(function() {
+              const $this = $(this);
+              const thisTop = $this.position().top;
+              const thisHeight = $this.outerHeight();
+              const thisMiddle = thisTop + thisHeight / 2;
+
+              // If mouse is above the middle of this holder
+              if (currentMouseY < thisMiddle) {
+                if (bestPosition === null || thisTop < bestPosition) {
+                  bestPosition = thisTop;
+                  bestHolder = $this;
+                  insertBefore = true;
+                }
+              } 
+              // If mouse is below the middle of this holder
+              else {
+                // If this is the last holder or the mouse is above the next holder
+                const nextHolder = $this.next('.single-holder');
+                if (nextHolder.length === 0 || currentMouseY < nextHolder.position().top) {
+                  if (bestPosition === null || thisTop + thisHeight > bestPosition) {
+                    bestPosition = thisTop + thisHeight;
+                    bestHolder = $this;
+                    insertBefore = false;
+                  }
+                }
+              }
+            });
+
+            // Move the placeholder to the best position
+            if (bestHolder !== null) {
+              placeholder.detach();
+              if (insertBefore) {
+                bestHolder.before(placeholder);
+              } else {
+                bestHolder.after(placeholder);
+              }
+            }
+          });
+
+          // Handle mouse up - finalize the move
+          $(document).on('mouseup.reorder', function() {
+            $(document).off('mousemove.reorder mouseup.reorder');
+
+            // Move the current holder to the placeholder position
+            placeholder.replaceWith(currentHolder);
+
+            // Reset styles
+            currentHolder.removeClass('dragging').css({
+              position: '',
+              zIndex: '',
+              width: '',
+              top: '',
+              left: ''
+            });
+
             saveTimeZones();
-          }
+          });
         });
         /************** /Delete and Drag functionality **************/
 
@@ -294,6 +391,11 @@
             timezones.push($(this).data('timezone'));
           });
           localStorage.setItem('savedTimezones', JSON.stringify(timezones));
+        }
+
+        // Save show inputs preference to localStorage
+        function saveShowInputsPreference() {
+          localStorage.setItem('showInputs', $('#show-inputs').is(':checked'));
         }
 
         // Load timezones from localStorage
@@ -310,7 +412,31 @@
             ];
           }
         }
+
+        // Load show inputs preference from localStorage
+        function loadShowInputsPreference() {
+          let showInputs = localStorage.getItem('showInputs');
+          return showInputs === null ? true : showInputs === 'true';
+        }
         /************** /LocalStorage functionality **************/
+
+        /************** Show/Hide Inputs functionality **************/
+        // Function to toggle visibility of datetime-local inputs
+        function toggleInputsVisibility() {
+          const showInputs = $('#show-inputs').is(':checked');
+          if (showInputs) {
+            $('input[type="datetime-local"]').show();
+          } else {
+            $('input[type="datetime-local"]').hide();
+          }
+          saveShowInputsPreference();
+        }
+
+        // Event handler for checkbox change
+        $('#show-inputs').on('change', function() {
+          toggleInputsVisibility();
+        });
+        /************** /Show/Hide Inputs functionality **************/
 
         /************** INIT **************/
         // Add special options to the dropdown
@@ -324,6 +450,11 @@
         initTimeZones.forEach((timezone) => {
           addTimeZone(timezone);
         });
+
+        // Initialize show inputs checkbox state
+        const showInputs = loadShowInputsPreference();
+        $('#show-inputs').prop('checked', showInputs);
+        toggleInputsVisibility(); // Apply initial visibility state
         /************** /INIT **************/
 
       });
@@ -370,10 +501,6 @@
             margin-bottom: 20px;
         }
 
-        .form-group {
-            margin-bottom: 20px;
-        }
-
         label {
             font-weight: 600;
             color: #2c3e50;
@@ -406,12 +533,15 @@
 
         .single-holder {
             background-color: #f8f9fa;
-            padding: 4px 15px 10px 15px;
+            padding: 4px 15px 0px 15px;
             margin-bottom: 10px;
             border-radius: 6px;
             border-left: 4px solid #3498db;
             position: relative;
-            cursor: move;
+        }
+
+        .timezone {
+            margin-bottom: 10px;
         }
 
         .datetime-pretty {
@@ -424,6 +554,7 @@
         .delete-btn {
             position: absolute;
             right: 10px;
+            top: -1px;
             font-size: 20px;
             color: #c1c1c1;
             cursor: pointer;
@@ -433,6 +564,37 @@
 
         .delete-btn:hover {
             opacity: 1;
+        }
+
+        .reorder-btn {
+            position: absolute;
+            right: 40px;
+            top: -1px;
+            font-size: 20px;
+            color: #c1c1c1;
+            cursor: grab;
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        }
+
+        .reorder-btn:hover {
+            opacity: 1;
+        }
+
+        .reorder-btn:active {
+            cursor: grabbing;
+        }
+
+        .dragging {
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            opacity: 0.8;
+            background-color: #f0f0f0;
+        }
+
+        .placeholder {
+            border: 2px dashed #3498db;
+            border-radius: 6px;
+            background-color: #f8f9fa;
         }
 
         /* Ago display */
@@ -456,7 +618,7 @@
 
 <body>
 
-<form action="/action_page.php">
+<form>
 
     <div class="portlet">
         <h1 style="margin-top: -10px;">Timezone Converter</h1>
@@ -467,10 +629,13 @@
     </div>
 
     <div class="portlet">
-        <div class="form-group">
             <label for="timezone-select">Add New Timezone:</label>
             <select id="timezone-select" style="width:100%;"></select>
-        </div>
+    </div>
+
+    <div class="portlet">
+            <input type="checkbox" id="show-inputs" checked>
+            <label for="show-inputs">Show inputs</label>
     </div>
 
 </form>
