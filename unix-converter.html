@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <title>Timezone Converter</title>
+    <script src="https://code.jquery.com/jquery-1.11.3.min.js"></script>
+
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-beta.1/dist/css/select2.min.css" rel="stylesheet"/>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-beta.1/dist/js/select2.min.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.28.0/moment.min.js"
+            integrity="sha512-Q1f3TS3vSt1jQ8AwP2OuenztnLU6LwxgyyYOG1jgMW/cbEMHps/3wjvnl1P3WTrF3chJUWEoxDUEjMxDV8pujg=="
+            crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.31/moment-timezone.min.js"
+            integrity="sha512-GqWOXT1UPIvzojfXEPf2ByPu4S0iwX0SfFfZ985fePNpTJPuiWKn47mXd0iyfcpcjcmM/HIRtvrd5TsR87A0Zg=="
+            crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.31/moment-timezone-with-data.min.js"
+            integrity="sha512-HZcf3uHWA+Y2P5KNv+F/xa87/flKVP92kUTe/KXjU8URPshczF1Dx+cL5bw0VBGhmqWAK0UbhcqxBbyiNtAnWQ=="
+            crossorigin="anonymous"></script>
+
+    <script type="text/javascript">
+
+        $(function () {
+
+            /************** /Utils Functions **************/
+            /**
+             * Round to significant figures
+             *
+             * @param {number} value
+             * @param {number} digits
+             * @return {number}
+             */
+            function sigFig(value, digits) {
+                var decimalPlaces;
+
+                if (value === 0) {
+                    decimalPlaces = digits - 1;
+                } else if (value < 0) {
+                    decimalPlaces = digits - Math.floor(Math.log10(-value)) - 1;
+                } else {
+                    decimalPlaces = digits - Math.floor(Math.log10(value)) - 1;
+                }
+
+                return Number(value.toFixed(decimalPlaces));
+            }
+
+            /**
+             * Display seconds in a pretty way
+             * e.g. instead of displaying 27845 seconds instead use this function to display 7 hrs 44 mins
+             *
+             * console.log(prettySeconds(86400));
+             * console.log(prettySeconds(86400 * 2));
+             * console.log(prettySeconds((86400 * 2) + 0.5 * 86400));
+             * console.log(prettySeconds(60 * 59));
+             * console.log(prettySeconds(31536000 * 10 + 2628000));
+             * console.log(prettySeconds(30.678));
+             * console.log(prettySeconds(0.678));
+             *
+             * console.log("");
+             *
+             * console.log(prettySeconds(-86400));
+             * console.log(prettySeconds(-86400 * 2));
+             * console.log(prettySeconds(-((86400 * 2) + 0.5 * 86400)));
+             * console.log(prettySeconds(-(60 * 59)));
+             * console.log(prettySeconds(-(31536000 * 10 + 2628000)));
+             * console.log(prettySeconds(-(30.678)));
+             * console.log(prettySeconds(-(0.678)));
+             *
+             * RETURNS:
+             *
+             * 1 day
+             * 2 days
+             * 2 days 12 hrs
+             * 59 mins
+             * 10 years 1 month
+             * 31 secs
+             * 0.68 secs
+             *
+             * -1 day
+             * -2 day
+             * -2 day -12 hr
+             * -59 min
+             * -10 year -1 month
+             * -31 secs
+             * -0.68 secs
+             *
+             * @param {number} inputSeconds
+             * @return {string}
+             */
+            function prettySeconds(inputSeconds) {
+                var neg = 1;
+                if (inputSeconds < 0) {
+                    neg = -1;
+                    inputSeconds = Math.abs(inputSeconds);
+                }
+
+                var years = Math.floor(inputSeconds / 31536000);
+                var months = Math.floor((inputSeconds % 31536000) / 2628000);
+                var weeks = Math.floor((inputSeconds % 2628000) / 604800);
+                var days = Math.floor((inputSeconds % 604800) / 86400);
+                var hours = Math.floor((inputSeconds % 86400) / 3600);
+                var minutes = Math.floor((inputSeconds % 3600) / 60);
+                var seconds = sigFig(inputSeconds % 60, 2);
+
+                // years *= neg;
+                // months *= neg;
+                // weeks *= neg;
+                // days *= neg;
+                // hours *= neg;
+                // minutes *= neg;
+                // seconds *= neg;
+                var prefix = neg === -1 ? 'in ' : '';
+                var suffix = neg === -1 ? '' : ' ago';
+
+                if (years) {
+                    return prefix + years + " year" + (years > 1 ? 's' : '') + (months >= 1 || months < 0 ? " " + months + " month" + (months > 1 ? 's' : '') : '') + suffix;
+                } else if (months) {
+                    return prefix + months + " month" + (months > 1 ? 's' : '') + (weeks >= 1 || weeks < 0 ? " " + weeks + " week" + (weeks > 1 ? 's' : '') : '') + suffix;
+                } else if (weeks) {
+                    return prefix + weeks + " week" + (weeks > 1 ? 's' : '') + (days >= 1 || days < 0 ? " " + days + " day" + (days > 1 ? 's' : '') : '') + suffix;
+                } else if (days) {
+                    return prefix + days + " day" + (days > 1 ? 's' : '') + (hours >= 1 || hours < 0 ? " " + hours + " hr" + (hours > 1 ? 's' : '') : '') + suffix;
+                } else if (hours) {
+                    return prefix + hours + " hr" + (hours > 1 ? 's' : '') + (minutes >= 1 || minutes < 0 ? " " + minutes + " min" + (minutes > 1 ? 's' : '') : '') + suffix;
+                } else if (minutes) {
+                    return prefix + minutes + " min" + (minutes > 1 ? 's' : '') + (seconds >= 1 || seconds < 0 ? " " + seconds + " sec" + (seconds > 1 ? 's' : '') : '') + suffix;
+                } else {
+                    return prefix + seconds + " sec" + (seconds !== 1 || seconds < 0 ? 's' : '') + suffix;
+                }
+            }
+            /************** Utils Functions **************/
+
+            /************** Update values **************/
+            $('body').on('change', '.timezone', function () {
+                var dateObj
+
+                if ($(this).is('#unix')) {
+                    dateObj = moment.unix(this.value);
+                } else {
+
+                    if (!this.value) {
+
+                        var local = new Date();
+                        local.setMinutes(local.getMinutes() - local.getTimezoneOffset());
+                        this.value = local.toJSON().slice(0, 19)
+                        console.log(local.toJSON().slice(0, 19));
+
+                    }
+
+                    var dateTime = this.value;
+                    var fromTimezone = $(this).data('timezone');
+                    dateObj = moment.tz(dateTime, fromTimezone);
+
+                    $('#unix').val(dateObj.format('X'));
+
+                }
+
+                // console.log(this.value, dateObj);
+
+                $('.timezone').not('#unix').each(function () {
+
+                    var toTimezone = $(this).data('timezone');
+                    var dateConverted = dateObj.tz(toTimezone).format('YYYY-MM-DDTHH:mm:ss');
+                    var datePretty = dateObj.tz(toTimezone).format("dddd, MMMM Do YYYY, h:mm:ss a | z (Z)");
+
+                    $(this).val(dateConverted);
+                    $(this).closest('.single-holder').find('.datetime-pretty').html(datePretty);
+
+                    // console.log(dateTime, dateObj, dateConverted);
+
+                })
+
+                $('#ago').html(prettySeconds(dateObj.diff(moment(), 'seconds') * -1));
+
+            })
+            /************** /Update values **************/
+
+            /************** SELECT2 **************/
+                // Setup select2
+            let select = $('#timezone-select');
+            select.select2({
+                placeholder: "Select one",
+                allowClear: true,
+                sorter: function (data) {
+                    return data.sort(function (a, b) {
+                        if (a.text === 'UTC') {
+                            return -1;
+                        }
+                        return a.text < b.text ? -1 : a.text > b.text ? 1 : 0;
+                    });
+                }
+            });
+
+
+            moment.tz.names().forEach((timeZone) => {
+                select.append(`<option value="${timeZone}">${timeZone}</option>`)
+            });
+
+            select.change(function () {
+
+                addTimeZone(this.value);
+
+            });
+            /************** /SELECT2 **************/
+
+            /************** Add timezone **************/
+            let addTimeZone = function (timezone) {
+                const selctor = timezone.replace(/[^a-zA-Z0-9]/g, '');
+                $('#timezoneholder').append(`
+<div class="single-holder">
+    <label for="${selctor}">${timezone}:</label><br>
+    <input type="datetime-local" id="${selctor}" data-timezone="${timezone}" class="timezone">
+    <span class="datetime-pretty"></span><br>
+</div>
+`)
+
+                $($('.timezone')[1]).change();
+
+            };
+            /************** /Add timezone **************/
+
+            /************** INIT **************/
+            let initTimeZones = [
+                'Pacific/Auckland',
+                'Europe/London',
+                'UTC',
+                'Canada/Yukon',
+            ];
+
+            initTimeZones.forEach((timezone) => {
+                addTimeZone(timezone)
+            })
+            /************** /INIT **************/
+
+        });
+    </script>
+
+    <style>
+        iframe, body, html {
+            width: 100%;
+            height: 100%;
+            border: none;
+            margin: 0;
+        }
+    </style>
+
+</head>
+
+<body>
+
+<form action="/action_page.php">
+
+    <label for="ago">Ago:</label><br>
+    <span id="ago">-</span><br>
+
+    <label for="unix">Unix Timestamp:</label><br>
+    <input type="text" id="unix" class="timezone"><br>
+
+    <div id="timezoneholder">
+    </div>
+    <br>
+    <br>
+    <select id="timezone-select" style="width:250px;"></select>
+
+</form>
+
+</body>
+
+</html>
