@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=0.9"/>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <title>Timezone Converter</title>
     <script src="https://code.jquery.com/jquery-1.11.3.min.js"></script>
     <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
@@ -263,7 +265,7 @@
 <div class="single-holder" data-timezone="${timezone}">
     <span class="reorder-btn">≡</span>
     <span class="delete-btn">&times;</span>
-    <label for="${selctor}">${timezone}: <span class="datetime-pretty"></span></label>
+    <label for="${selctor}">${timezone}: <br class="hide-on-wide-screen"/><span class="datetime-pretty"></span></label>
     <input type="datetime-local" id="${selctor}" data-timezone="${timezone}" class="timezone">
 </div>
 `);
@@ -605,6 +607,13 @@
 
             .portlet {
                 padding: 15px;
+            }
+        }
+
+        /* Responsive adjustments */
+        @media (min-width: 565px) {
+            .hide-on-wide-screen {
+                display: none;
             }
         }
     </style>
