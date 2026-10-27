@@ -1,0 +1,8 @@
+{
+  "appId": "io.github.theogibbons.timezoneconverter",
+  "appName": "Timezone Converter",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

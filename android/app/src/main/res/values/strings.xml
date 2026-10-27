@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Timezone Converter</string>
+    <string name="title_activity_main">Timezone Converter</string>
+    <string name="package_name">io.github.theogibbons.timezoneconverter</string>
+    <string name="custom_url_scheme">io.github.theogibbons.timezoneconverter</string>
+</resources>

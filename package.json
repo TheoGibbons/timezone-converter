@@ -1,0 +1,23 @@
+{
+  "name": "timezone-converter",
+  "version": "1.0.0",
+  "description": "Convert times between timezones, compare multiple timezones side by side, and convert unix timestamps. Works fully offline.",
+  "private": true,
+  "scripts": {
+    "icons": "node scripts/generate-icons.js",
+    "build": "node scripts/build-www.js",
+    "sync": "npm run build && npx cap sync android",
+    "android:apk": "npm run sync && cd android && gradlew assembleDebug",
+    "android:bundle": "npm run sync && cd android && gradlew bundleRelease"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/core": "^8.4.1"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "sharp": "^0.35.3"
+  }
+}
