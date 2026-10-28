@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=0.9"/>
+    <meta name="theme-color" content="#3498db"/>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <title>Meeting Planner</title>
+    <script src="libs/jquery-1.11.3.min.js"></script>
+
+    <link href="libs/select2.min.css" rel="stylesheet"/>
+    <script src="libs/select2.min.js"></script>
+
+    <script src="libs/moment.min.js"></script>
+    <script src="libs/moment-timezone-with-data.min.js"></script>
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('sw.js').catch(function () {
+            // Offline caching unavailable (e.g. unsupported scheme); app still works.
+          });
+        });
+      }
+    </script>
+
+    <script type="text/javascript">
+
+      $(function () {
+
+        const INTERVALS = [60, 30, 20, 15, 10];
+        const DATE_FORMAT = 'YYYY-MM-DDTHH:mm';
+        const FULL_FORMAT = 'dddd, MMMM D, YYYY [at] HH:mm:ss';
+        const SHORT_FORMAT = 'ddd HH:mm';
+        const PRETTY_FORMAT = 'dddd, MMMM Do YYYY, h:mm:ss a | z (Z)';
+        const HOUR_MS = 60 * 60 * 1000;
+        const WEEK_MS = 7 * 24 * HOUR_MS;
+
+        // Everything on the page is rendered from this. start is a unix timestamp in ms.
+        let state = {
+          timezones: [],
+          full: [],
+          interval: 60,
+          start: 0
+        };
+
+        // Column being dragged to a new position, if any
+        let draggingTimezone = null;
+
+        /************** Utils Functions **************/
+        /**
+         * Canonical spelling of a timezone, or null if moment doesn't know it
+         *
+         * @param {string} name
+         * @return {string|null}
+         */
+        function normalizeTimeZone(name) {
+          const zone = typeof name === 'string' ? moment.tz.zone(name.trim()) : null;
+          return zone ? zone.name : null;
+        }
+
+        /**
+         * Drop unknown and duplicate timezones
+         *
+         * @param {string[]} names
+         * @return {string[]}
+         */
+        function parseTimeZones(names) {
+          let timezones = [];
+          names.forEach((name) => {
+            const timezone = normalizeTimeZone(name);
+            if (timezone && !timezones.includes(timezone)) {
+              timezones.push(timezone);
+            }
+          });
+          return timezones;
+        }
+
+        /**
+         * e.g. 90 => "1 hour 30 minutes"
+         *
+         * @param {number} minutes
+         * @return {string}
+         */
+        function prettyMinutes(minutes) {
+          const hours = Math.floor(minutes / 60);
+          const mins = minutes % 60;
+          let parts = [];
+          if (hours) parts.push(hours + ' hour' + (hours > 1 ? 's' : ''));
+          if (mins) parts.push(mins + ' minute' + (mins > 1 ? 's' : ''));
+          return parts.join(' ');
+        }
+
+        /**
+         * Cell colour for a local hour, same bands as timeanddate.com
+         *
+         * @param {number} hour
+         * @return {string}
+         */
+        function hourClass(hour) {
+          if (hour < 7) return 'night';
+          if (hour < 8) return 'edge';
+          if (hour < 18) return 'day';
+          if (hour < 22) return 'edge';
+          return 'night';
+        }
+
+        // The start date picker is shown in the first column's timezone
+        function referenceTimeZone() {
+          return state.timezones[0] || moment.tz.guess();
+        }
+
+        function startValue() {
+          return moment.tz(state.start, referenceTimeZone()).format(DATE_FORMAT);
+        }
+        /************** /Utils Functions **************/
+
+        /************** LocalStorage and URL **************/
+        function readStorage(key) {
+          try {
+            return JSON.parse(localStorage.getItem(key));
+          } catch (e) {
+            return null;
+          }
+        }
+
+        // Save everything except the date, like the converter page
+        function saveState() {
+          localStorage.setItem('plannerTimezones', JSON.stringify(state.timezones));
+          localStorage.setItem('plannerFullDate', JSON.stringify(state.full));
+          localStorage.setItem('plannerInterval', JSON.stringify(state.interval));
+        }
+
+        // First visit: start from the converter page's timezones
+        function defaultTimeZones() {
+          const converterTimezones = readStorage('savedTimezones');
+          const timezones = parseTimeZones(Array.isArray(converterTimezones) ? converterTimezones : []);
+          return timezones.length ? timezones : ["Pacific/Auckland", "Canada/Yukon", "Europe/London", "UTC"];
+        }
+
+        // A shared link (anything with tz=) wins over what's saved locally
+        function loadState() {
+          const params = new URLSearchParams(window.location.search);
+          let full;
+
+          if (params.has('tz')) {
+            state.timezones = parseTimeZones(params.get('tz').split(','));
+            full = params.has('full') ? params.get('full').split(',') : null;
+            state.interval = Number(params.get('interval'));
+          } else {
+            const savedTimezones = readStorage('plannerTimezones');
+            state.timezones = Array.isArray(savedTimezones) ? parseTimeZones(savedTimezones) : defaultTimeZones();
+            full = readStorage('plannerFullDate');
+            state.interval = readStorage('plannerInterval');
+          }
+
+          state.full = Array.isArray(full) ? parseTimeZones(full).filter((timezone) => state.timezones.includes(timezone)) : state.timezones.slice(0, 1);
+
+          if (!INTERVALS.includes(state.interval)) {
+            state.interval = 60;
+          }
+
+          const start = moment.tz(params.get('date') || '', [DATE_FORMAT, 'YYYY-MM-DD'], true, referenceTimeZone());
+          state.start = start.isValid() ? start.valueOf() : moment.tz(referenceTimeZone()).startOf('day').valueOf();
+        }
+
+        function updateUrl() {
+          // Leave / , and : readable in the link
+          const encode = (value) => encodeURIComponent(value).replace(/%2F/g, '/').replace(/%2C/g, ',').replace(/%3A/g, ':');
+          const query = [
+            'date=' + encode(startValue()),
+            'interval=' + state.interval,
+            'tz=' + encode(state.timezones.join(',')),
+            'full=' + encode(state.full.join(','))
+          ].join('&');
+          history.replaceState(null, '', '?' + query);
+        }
+
+        function commit() {
+          saveState();
+          updateUrl();
+          render();
+        }
+        /************** /LocalStorage and URL **************/
+
+        /************** Render **************/
+        function render() {
+          renderForm();
+          renderDstWarning();
+          renderTable();
+        }
+
+        function renderForm() {
+          $('#start-timezone').text(referenceTimeZone());
+          // Don't rewrite the picker while the user is typing in it
+          if (document.activeElement !== $('#start')[0]) {
+            $('#start').val(startValue());
+          }
+          $('#interval').val(state.interval);
+        }
+
+        // Warn about any UTC offset change within a week either side of the start
+        function renderDstWarning() {
+          const from = state.start - WEEK_MS;
+          const to = state.start + WEEK_MS;
+          const end = state.start + 24 * HOUR_MS;
+          let items = [];
+
+          state.timezones.forEach((timezone) => {
+            const zone = moment.tz.zone(timezone);
+
+            // offsets[i] applies until untils[i]; moment offsets are minutes *behind* UTC
+            for (let i = 0; i < zone.untils.length - 1 && zone.untils[i] <= to; i++) {
+              const time = zone.untils[i];
+              const shift = zone.offsets[i] - zone.offsets[i + 1];
+              if (time < from || shift === 0) {
+                continue;
+              }
+
+              const before = moment.utc(time).subtract(zone.offsets[i], 'minutes');
+              const after = moment.utc(time).subtract(zone.offsets[i + 1], 'minutes');
+              const shown = time >= state.start && time < end ? ' &mdash; within the times shown below' : '';
+
+              items.push(`<li><b>${timezone}</b>: clocks go ${shift > 0 ? 'forward' : 'back'} ${prettyMinutes(Math.abs(shift))} on ${before.format('dddd, MMMM Do YYYY')} (${before.format('h:mm a')} ${zone.abbrs[i]} &rarr; ${after.format('h:mm a')} ${zone.abbrs[i + 1]})${shown}</li>`);
+            }
+          });
+
+          $('#dst-warning').toggle(items.length > 0).find('ul').html(items.join(''));
+        }
+
+        function renderTable() {
+          hideTooltip(true);
+
+          const rows = 24 * 60 / state.interval;
+          const full = state.timezones.map((timezone) => state.full.includes(timezone));
+
+          let head = state.timezones.map((timezone, index) => `
+<th data-index="${index}"${timezone === draggingTimezone ? ' class="dragging"' : ''}>
+    <div class="th-inner">
+        <label><input type="checkbox" class="full-toggle" title="Show the full date" ${full[index] ? 'checked' : ''}>${timezone}</label>
+        <span class="reorder-btn" title="Drag to reorder">≡</span>
+        <button type="button" class="remove-btn" title="Remove ${timezone}">&minus;</button>
+    </div>
+</th>`).join('');
+          head += '<th class="add-col"><button type="button" id="add-btn" title="Add timezone">+</button></th>';
+
+          let body = '';
+          let previousDates = [];
+          for (let i = 0; i < rows; i++) {
+            const time = state.start + i * state.interval * 60 * 1000;
+            body += `<tr data-time="${time}">`;
+
+            state.timezones.forEach((timezone, index) => {
+              const local = moment.tz(time, timezone);
+              const date = local.format('YYYY-MM-DD');
+              let classes = ['cell', hourClass(local.hours())];
+              if (timezone === draggingTimezone) {
+                classes.push('dragging');
+              }
+
+              // Line above the first cell of each new local day
+              if (i > 0 && date !== previousDates[index]) {
+                classes.push('new-day');
+              }
+              previousDates[index] = date;
+
+              body += `<td class="${classes.join(' ')}" data-index="${index}">${local.format(full[index] ? FULL_FORMAT : SHORT_FORMAT)}</td>`;
+            });
+
+            body += '<td class="add-col"></td></tr>';
+          }
+
+          if (!state.timezones.length) {
+            body = '<tr><td class="empty">Add a timezone with the + button.</td><td class="add-col"></td></tr>';
+          }
+
+          $('#planner').html(`<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`);
+        }
+        /************** /Render **************/
+
+        /************** Form **************/
+        $('#planner-form').on('submit', (e) => e.preventDefault());
+
+        $('#start').on('change', function () {
+          const start = moment.tz(this.value, DATE_FORMAT, true, referenceTimeZone());
+          // Ignore half-typed or cleared values; blur puts the last good value back
+          if (!start.isValid()) {
+            return;
+          }
+          state.start = start.valueOf();
+          commit();
+        }).on('blur', function () {
+          this.value = startValue();
+        });
+
+        $('#interval').on('change', function () {
+          state.interval = Number(this.value);
+          commit();
+        });
+
+        $('.shift-btn').on('click', function () {
+          state.start += $(this).data('hours') * HOUR_MS;
+          commit();
+        });
+        /************** /Form **************/
+
+        /************** Add / remove timezones **************/
+        function addTimeZone(timezone) {
+          timezone = normalizeTimeZone(timezone);
+          if (!timezone || state.timezones.includes(timezone)) {
+            return;
+          }
+
+          state.timezones.push(timezone);
+          // The first column shows the full date by default
+          if (state.timezones.length === 1) {
+            state.full = [timezone];
+          }
+          commit();
+        }
+
+        $('#planner').on('click', '.remove-btn', function () {
+          const timezone = state.timezones[$(this).closest('th').data('index')];
+          state.timezones = state.timezones.filter((t) => t !== timezone);
+          state.full = state.full.filter((t) => t !== timezone);
+          commit();
+        });
+
+        $('#planner').on('change', '.full-toggle', function () {
+          const timezone = state.timezones[$(this).closest('th').data('index')];
+          const checked = this.checked;
+          state.full = state.timezones.filter((t) => t === timezone ? checked : state.full.includes(t));
+          commit();
+        });
+        /************** /Add / remove timezones **************/
+
+        /************** Reorder columns **************/
+        $('#planner').on('pointerdown', '.reorder-btn', function (event) {
+          const pointer = event.originalEvent;
+          if (pointer.button !== 0) {
+            return;
+          }
+          event.preventDefault();
+          // The handle is re-rendered as the column moves, so don't let it hold on to the pointer
+          if (this.hasPointerCapture(pointer.pointerId)) {
+            this.releasePointerCapture(pointer.pointerId);
+          }
+
+          draggingTimezone = state.timezones[$(this).closest('th').data('index')];
+          $('body').addClass('reordering');
+          renderTable();
+
+          $(document).on('pointermove.reorder', function (e) {
+            const x = e.originalEvent.clientX;
+
+            // New position = how many of the other columns have their middle left of the pointer
+            let target = 0;
+            $('#planner thead th').not('.add-col').each(function () {
+              const rect = this.getBoundingClientRect();
+              if (state.timezones[$(this).data('index')] !== draggingTimezone && x > rect.left + rect.width / 2) {
+                target++;
+              }
+            });
+
+            if (state.timezones.indexOf(draggingTimezone) !== target) {
+              state.timezones = state.timezones.filter((t) => t !== draggingTimezone);
+              state.timezones.splice(target, 0, draggingTimezone);
+              renderTable();
+            }
+          });
+
+          $(document).on('pointerup.reorder pointercancel.reorder', function () {
+            $(document).off('.reorder');
+            $('body').removeClass('reordering');
+            draggingTimezone = null;
+            // Keep the full-date list in column order for the URL
+            state.full = state.timezones.filter((t) => state.full.includes(t));
+            commit();
+          });
+        });
+        /************** /Reorder columns **************/
+
+        /************** SELECT2 **************/
+        const popover = $('#timezone-popover');
+        const select = $('#timezone-select');
+
+        moment.tz.names().forEach((timeZone) => {
+          select.append(`<option value="${timeZone}">${timeZone}</option>`)
+        });
+
+        select.select2({
+          placeholder: "Search timezones",
+          width: '100%',
+          dropdownParent: popover,
+          sorter: function (data) {
+            return data.sort(function (a, b) {
+              if (a.id === 'UTC') return -1;
+              if (b.id === 'UTC') return 1;
+              return a.text.localeCompare(b.text);
+            });
+          }
+        });
+
+        // The + button pops the select up underneath itself
+        $('#planner').on('click', '#add-btn', function () {
+          if (popover.is(':visible')) {
+            select.select2('close');
+            return;
+          }
+
+          const button = $(this);
+          const offset = button.offset();
+          popover.show();
+          const maxLeft = $(window).scrollLeft() + $(window).width() - popover.outerWidth() - 5;
+          popover.css({
+            top: offset.top + button.outerHeight() + 6,
+            left: Math.max(5, Math.min(offset.left + button.outerWidth() - popover.outerWidth(), maxLeft))
+          });
+          select.select2('open');
+        });
+
+        select.on('select2:select', (e) => addTimeZone(e.params.data.id));
+
+        select.on('select2:open', function () {
+          setTimeout(function () {
+            $(document).on('mousedown.popover', function (e) {
+              if (!$(e.target).closest('.select2-container, #timezone-popover, #add-btn').length) {
+                select.select2('close');
+              }
+            });
+          }, 0);
+        });
+
+        select.on('select2:close', function () {
+          $(document).off('mousedown.popover');
+          select.val(null).trigger('change.select2');
+          popover.hide();
+        });
+        /************** /SELECT2 **************/
+
+        /************** Cell tooltip **************/
+        const tooltip = $('#cell-tooltip');
+        let tooltipCell = null;
+        let showTimer = null;
+        let hideTimer = null;
+        let overTooltip = false;
+        let leftTooltip = false;
+        let selecting = false;
+
+        // While the user is selecting/has selected tooltip text, keep it put so they can copy
+        function tooltipHasSelection() {
+          const selection = window.getSelection();
+          return selecting || (!selection.isCollapsed && tooltip[0].contains(selection.anchorNode));
+        }
+
+        function showTooltip(cell) {
+          clearTimeout(showTimer);
+          clearTimeout(hideTimer);
+          if (cell === tooltipCell || tooltipHasSelection()) {
+            return;
+          }
+          setTooltipCell(cell);
+
+          const $cell = $(cell);
+          const time = Number($cell.closest('tr').data('time'));
+          const timezone = state.timezones[$cell.data('index')];
+          tooltip.find('.tooltip-text').text(moment.tz(time, timezone).format(PRETTY_FORMAT));
+          tooltip.find('.copy-btn').text('Copy');
+
+          // Measure at the left edge so the old position doesn't squash the width
+          tooltip.css({left: 0, top: 0}).show();
+          const offset = $cell.offset();
+          const width = tooltip.outerWidth();
+          const maxLeft = $(window).scrollLeft() + $(window).width() - width - 5;
+          // Overlap the cell's edge so there's no gap to cross on the way to the Copy button
+          let top = offset.top - tooltip.outerHeight() + 3;
+          if (top < $(window).scrollTop()) {
+            top = offset.top + $cell.outerHeight() - 3;
+          }
+          tooltip.css({
+            left: Math.max(5, Math.min(offset.left + ($cell.outerWidth() - width) / 2, maxLeft)),
+            top: top
+          });
+        }
+
+        // Keeps the cell and its row highlighted while the mouse is over the tooltip
+        function setTooltipCell(cell) {
+          $(tooltipCell).removeClass('tooltip-cell').closest('tr').removeClass('tooltip-row');
+          tooltipCell = cell;
+          $(cell).addClass('tooltip-cell').closest('tr').addClass('tooltip-row');
+        }
+
+        function hideTooltip(force) {
+          if (tooltipHasSelection()) {
+            if (!force) {
+              return;
+            }
+            window.getSelection().removeAllRanges();
+            selecting = false;
+          }
+          clearTimeout(showTimer);
+          clearTimeout(hideTimer);
+          tooltip.hide();
+          setTooltipCell(null);
+          overTooltip = false;
+        }
+
+        function scheduleHide() {
+          clearTimeout(hideTimer);
+          hideTimer = setTimeout(() => hideTooltip(), 300);
+        }
+
+        function copyText(element) {
+          if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText($(element).text());
+          }
+          // Plain http has no clipboard API, so copy through a selection
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          window.getSelection().removeAllRanges();
+          window.getSelection().addRange(range);
+          document.execCommand('copy');
+          return Promise.resolve();
+        }
+
+        $('#planner')
+          .on('mouseenter', 'td.cell', function () {
+            const cell = this;
+            if (draggingTimezone) {
+              return;
+            }
+            // Going straight from cell to cell the tooltip follows at once. Arriving any other way
+            // (off the tooltip, or from outside the table) it waits for the mouse to settle, so it
+            // doesn't get in the way of sweeping up and down the table.
+            const follow = cell === tooltipCell || (tooltip.is(':visible') && !leftTooltip);
+            leftTooltip = false;
+            if (follow) {
+              showTooltip(cell);
+            } else {
+              hideTooltip();
+              showTimer = setTimeout(() => showTooltip(cell), 300);
+            }
+          })
+          .on('click', 'td.cell', function () {
+            showTooltip(this);
+          })
+          .on('mouseleave', 'td.cell', function () {
+            clearTimeout(showTimer);
+            scheduleHide();
+          });
+
+        tooltip
+          .on('mouseenter', function () {
+            overTooltip = true;
+            clearTimeout(hideTimer);
+          })
+          .on('mouseleave', function () {
+            overTooltip = false;
+            leftTooltip = true;
+            scheduleHide();
+          })
+          .on('mousedown', function () {
+            selecting = true;
+          })
+          .on('click', '.copy-btn', function () {
+            const button = $(this);
+            copyText(tooltip.find('.tooltip-text')[0]).then(() => button.text('Copied!'));
+          });
+
+        $(document)
+          .on('mouseup', function () {
+            if (selecting) {
+              selecting = false;
+              if (!overTooltip) {
+                scheduleHide();
+              }
+            }
+          })
+          .on('mousedown', function (e) {
+            if (!$(e.target).closest('#cell-tooltip, #planner td.cell').length) {
+              hideTooltip(true);
+            }
+          });
+
+        $('.table-wrapper').on('scroll', () => hideTooltip(true));
+        $(window).on('resize', () => hideTooltip(true));
+        /************** /Cell tooltip **************/
+
+        /************** INIT **************/
+        loadState();
+        updateUrl();
+        render();
+        /************** /INIT **************/
+
+      });
+    </script>
+
+    <style>
+        /* Base styles */
+        body, html {
+            width: 100%;
+            border: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f5f7fa;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            box-sizing: border-box;
+        }
+
+        /* Header styling */
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+            font-weight: 600;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        /* Page navigation */
+        .page-nav {
+            text-align: center;
+            margin: -20px 0 20px;
+            font-size: 14px;
+        }
+
+        .page-nav a {
+            color: #3498db;
+            text-decoration: none;
+            margin: 0 8px;
+        }
+
+        .page-nav a.active {
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        /* Form elements */
+        .portlet {
+            background-color: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        form > .portlet:not(:last-child) {
+            margin-bottom: 20px;
+        }
+
+        label {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+            display: inline-block;
+        }
+
+        input[type="datetime-local"],
+        #interval {
+            width: 100%;
+            padding: 4px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            font-family: inherit;
+            background-color: white;
+            transition: border-color 0.3s;
+            box-sizing: border-box;
+        }
+
+        input[type="datetime-local"]:focus,
+        #interval:focus {
+            border-color: #3498db;
+            outline: none;
+            box-shadow: 0 0 5px rgba(52, 152, 219, 0.5);
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .control {
+            flex: 1 1 220px;
+        }
+
+        /* Daylight saving warning */
+        .dst-warning {
+            display: none;
+            margin-top: 20px;
+            padding: 10px 15px;
+            background-color: #fff3cd;
+            border-left: 4px solid #f0ad4e;
+            border-radius: 6px;
+            color: #856404;
+            font-size: 14px;
+        }
+
+        .dst-warning ul {
+            margin: 5px 0 0;
+            padding-left: 20px;
+        }
+
+        /* Earlier / later buttons */
+        .shift-btn {
+            display: block;
+            width: 100%;
+            padding: 6px;
+            background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            color: #2c3e50;
+            font-family: inherit;
+            font-size: 14px;
+            cursor: pointer;
+            transition: border-color 0.3s, color 0.3s;
+        }
+
+        .shift-btn:hover {
+            border-color: #3498db;
+            color: #3498db;
+        }
+
+        /* Planner table */
+        .table-wrapper {
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        #planner {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        #planner th {
+            background-color: #f8f9fa;
+            border-bottom: 2px solid #3498db;
+            padding: 6px 10px;
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        #planner .th-inner {
+            display: flex;
+            align-items: center;
+        }
+
+        /* Pushes the reorder and remove buttons to the right of the cell */
+        #planner th label {
+            flex: 1 1 auto;
+            margin: 0 10px 0 0;
+            cursor: pointer;
+        }
+
+        #planner th input[type="checkbox"] {
+            margin: 0 6px 0 0;
+            vertical-align: middle;
+        }
+
+        #planner td {
+            padding: 3px 10px;
+            white-space: nowrap;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+        }
+
+        #planner td.cell {
+            cursor: default;
+        }
+
+        /* Highlight the hovered row, and the tooltip's row while the mouse is on the tooltip */
+        #planner tbody tr:hover td.cell,
+        #planner tbody tr.tooltip-row td.cell {
+            background-image: linear-gradient(rgba(0, 0, 0, 0.08), rgba(0, 0, 0, 0.08));
+        }
+
+        #planner td.cell:hover,
+        #planner td.tooltip-cell {
+            box-shadow: inset 0 0 0 2px #3498db;
+        }
+
+        #planner td.new-day {
+            border-top: 2px solid rgba(0, 0, 0, 0.35);
+        }
+
+        #planner td.empty {
+            color: #7f8c8d;
+            font-style: italic;
+            padding: 15px 10px;
+        }
+
+        #planner .add-col {
+            width: 1%;
+            text-align: center;
+        }
+
+        .day {
+            background-color: #d4edda;
+        }
+
+        .edge {
+            background-color: #fff3cd;
+        }
+
+        .night {
+            background-color: #f8d7da;
+        }
+
+        .remove-btn,
+        .reorder-btn,
+        #add-btn {
+            border: none;
+            background: none;
+            padding: 0 4px;
+            font-size: 20px;
+            line-height: 1;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.3s;
+        }
+
+        .remove-btn {
+            position: relative;
+            top: 3.1px;
+            color: #e74c3c;
+            font-weight: 600;
+        }
+
+        .reorder-btn {
+            color: #c1c1c1;
+            cursor: grab;
+            touch-action: none;
+            user-select: none;
+        }
+
+        #add-btn {
+            color: #3498db;
+            font-size: 22px;
+            font-weight: 600;
+        }
+
+        .remove-btn:hover,
+        .reorder-btn:hover,
+        #add-btn:hover {
+            opacity: 1;
+        }
+
+        /* Column being dragged */
+        #planner .dragging {
+            opacity: 0.5;
+        }
+
+        body.reordering,
+        body.reordering * {
+            cursor: grabbing !important;
+            user-select: none;
+        }
+
+        /* Legend */
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px 20px;
+            margin-top: 15px;
+            font-size: 13px;
+            color: #7f8c8d;
+        }
+
+        .swatch {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin-right: 6px;
+            border-radius: 2px;
+            vertical-align: -1px;
+        }
+
+        /* Add timezone popover */
+        .timezone-popover {
+            display: none;
+            position: absolute;
+            z-index: 1000;
+            width: 300px;
+            max-width: calc(100vw - 30px);
+            padding: 10px;
+            background-color: white;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Cell tooltip */
+        .cell-tooltip {
+            display: none;
+            position: absolute;
+            z-index: 1000;
+            max-width: calc(100vw - 30px);
+            padding: 5px 8px 5px 10px;
+            background-color: #2c3e50;
+            color: white;
+            border-radius: 4px;
+            font-size: 13px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        }
+
+        .cell-tooltip .copy-btn {
+            margin-left: 8px;
+            padding: 1px 6px;
+            background-color: rgba(255, 255, 255, 0.15);
+            color: white;
+            border: none;
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .cell-tooltip .copy-btn:hover {
+            background-color: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .portlet {
+                padding: 15px;
+            }
+        }
+    </style>
+
+</head>
+
+<body>
+
+<form id="planner-form">
+
+    <div class="portlet">
+        <h1 style="margin-top: -10px;">Meeting Planner</h1>
+        <nav class="page-nav"><a href="index.html">Converter</a><a href="meeting-planner.html" class="active">Meeting Planner</a></nav>
+
+        <div class="controls">
+            <div class="control">
+                <label for="start">Start (<span id="start-timezone"></span>):</label>
+                <input type="datetime-local" id="start">
+            </div>
+            <div class="control">
+                <label for="interval">Interval:</label>
+                <select id="interval">
+                    <option value="60">Every hour</option>
+                    <option value="30">Every half-hour</option>
+                    <option value="20">Every 20 minutes</option>
+                    <option value="15">Every 15 minutes</option>
+                    <option value="10">Every 10 minutes</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="dst-warning" class="dst-warning">
+            <strong>&#9888; Daylight Savings</strong>
+            <ul></ul>
+        </div>
+    </div>
+
+    <div class="portlet">
+        <button type="button" class="shift-btn" data-hours="-6">&#9650; 6 hours earlier</button>
+        <div class="table-wrapper">
+            <table id="planner"></table>
+        </div>
+        <button type="button" class="shift-btn" data-hours="6">&#9660; 6 hours later</button>
+
+        <div class="legend">
+            <span><i class="swatch day"></i>08:00&ndash;18:00</span>
+            <span><i class="swatch edge"></i>07:00&ndash;08:00, 18:00&ndash;22:00</span>
+            <span><i class="swatch night"></i>22:00&ndash;07:00</span>
+        </div>
+    </div>
+
+</form>
+
+<div id="timezone-popover" class="timezone-popover">
+    <select id="timezone-select"><option></option></select>
+</div>
+
+<div id="cell-tooltip" class="cell-tooltip"><span class="tooltip-text"></span><button type="button" class="copy-btn">Copy</button></div>
+
+</body>
+
+</html>

@@ -1,9 +1,12 @@
 /* Service worker: precaches the whole app so it works fully offline. */
-const CACHE_NAME = 'timezone-converter-v1';
+// Set by .github/workflows/update-moment-timezone.yml, so new timezone data gets a fresh cache
+const TZ_VERSION = '0.6.5';
+const CACHE_NAME = 'timezone-converter-v2-tz' + TZ_VERSION;
 
 const PRECACHE_URLS = [
   './',
   'index.html',
+  'meeting-planner.html',
   'favicon.ico',
   'manifest.webmanifest',
   'libs/jquery-1.11.3.min.js',
@@ -19,7 +22,8 @@ const PRECACHE_URLS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
+      // Bypass the HTTP cache so an update never re-caches stale files
+      .then((cache) => cache.addAll(PRECACHE_URLS.map((url) => new Request(url, { cache: 'reload' }))))
       .then(() => self.skipWaiting())
   );
 });

@@ -1,0 +1,50 @@
+name: Update moment-timezone
+
+# Pulls the latest moment-timezone build (and with it the latest IANA timezone data) into libs/
+# and commits it back if it changed. Pushes made with GITHUB_TOKEN don't trigger another run.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-moment-timezone
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download latest moment-timezone
+        id: download
+        run: |
+          version=$(npm view moment-timezone version)
+          cd "$RUNNER_TEMP"
+          npm pack "moment-timezone@$version" --ignore-scripts --silent
+          tar -xzf "moment-timezone-$version.tgz" package/builds/moment-timezone-with-data.min.js
+          cp package/builds/moment-timezone-with-data.min.js "$GITHUB_WORKSPACE/libs/"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Installed copies of the app only re-download files when sw.js changes
+      - name: Bump the service worker cache
+        env:
+          VERSION: ${{ steps.download.outputs.version }}
+        run: sed -i "s/^const TZ_VERSION = .*/const TZ_VERSION = '$VERSION';/" sw.js
+
+      - name: Commit if changed
+        env:
+          VERSION: ${{ steps.download.outputs.version }}
+        run: |
+          if git diff --quiet; then
+            echo "moment-timezone $VERSION is already up to date"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Update moment-timezone to $VERSION"
+          git push

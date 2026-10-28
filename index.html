@@ -478,6 +478,7 @@
             padding: 20px;
             max-width: 1200px;
             margin: 0 auto;
+            box-sizing: border-box;
         }
 
         /* Header styling */
@@ -488,6 +489,24 @@
             font-weight: 600;
             border-bottom: 2px solid #3498db;
             padding-bottom: 10px;
+        }
+
+        /* Page navigation */
+        .page-nav {
+            text-align: center;
+            margin: -20px 0 20px;
+            font-size: 14px;
+        }
+
+        .page-nav a {
+            color: #3498db;
+            text-decoration: none;
+            margin: 0 8px;
+        }
+
+        .page-nav a.active {
+            color: #2c3e50;
+            font-weight: 600;
         }
 
         /* Form elements */
@@ -630,6 +649,7 @@
 
     <div class="portlet">
         <h1 style="margin-top: -10px;">Timezone Converter</h1>
+        <nav class="page-nav"><a href="index.html" class="active">Converter</a><a href="meeting-planner.html">Meeting Planner</a></nav>
 
         <div id="timezoneholder">
             <!-- Timezone inputs will be added here dynamically -->

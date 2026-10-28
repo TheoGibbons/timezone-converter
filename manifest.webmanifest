@@ -1,7 +1,7 @@
 {
   "name": "Timezone Converter",
   "short_name": "Timezones",
-  "description": "Convert times between timezones, compare multiple timezones side by side, and convert unix timestamps. Works fully offline.",
+  "description": "Convert times between timezones, compare multiple timezones side by side, plan meetings across timezones, and convert unix timestamps. Works fully offline.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
