@@ -16,6 +16,9 @@
     <script src="libs/moment.min.js"></script>
     <script src="libs/moment-timezone-with-data.min.js"></script>
 
+    <link href="timezone-search.css" rel="stylesheet"/>
+    <script src="timezone-search.js"></script>
+
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {
@@ -36,14 +39,21 @@
         const SHORT_FORMAT = 'ddd HH:mm';
         const PRETTY_FORMAT = 'dddd, MMMM Do YYYY, h:mm:ss a | z (Z)';
         const HOUR_MS = 60 * 60 * 1000;
-        const WEEK_MS = 7 * 24 * HOUR_MS;
+        const DAY_MS = 24 * HOUR_MS;
+        const WEEK_MS = 7 * DAY_MS;
 
-        // Everything on the page is rendered from this. start is a unix timestamp in ms.
+        // Everything on the page is rendered from this. start and end are unix timestamps in ms.
         let state = {
           timezones: [],
           full: [],
           interval: 60,
-          start: 0
+          start: 0,
+          end: DAY_MS,
+          // Whether the earlier buttons move the end too, and the later buttons the start
+          moveEnd: true,
+          moveStart: true,
+          // Abbreviation each timezone was found by, e.g. {"America/Los_Angeles": "PST"}. Not shared in the URL.
+          abbreviations: {}
         };
 
         // Column being dragged to a new position, if any
@@ -112,8 +122,12 @@
           return state.timezones[0] || moment.tz.guess();
         }
 
+        function localValue(time) {
+          return moment.tz(time, referenceTimeZone()).format(DATE_FORMAT);
+        }
+
         function startValue() {
-          return moment.tz(state.start, referenceTimeZone()).format(DATE_FORMAT);
+          return localValue(state.start);
         }
         /************** /Utils Functions **************/
 
@@ -126,11 +140,14 @@
           }
         }
 
-        // Save everything except the date, like the converter page
+        // Save everything except the dates, like the converter page
         function saveState() {
           localStorage.setItem('plannerTimezones', JSON.stringify(state.timezones));
           localStorage.setItem('plannerFullDate', JSON.stringify(state.full));
           localStorage.setItem('plannerInterval', JSON.stringify(state.interval));
+          localStorage.setItem('plannerAbbreviations', JSON.stringify(state.abbreviations));
+          localStorage.setItem('plannerMoveEnd', JSON.stringify(state.moveEnd));
+          localStorage.setItem('plannerMoveStart', JSON.stringify(state.moveStart));
         }
 
         // First visit: start from the converter page's timezones
@@ -162,8 +179,19 @@
             state.interval = 60;
           }
 
+          const abbreviations = readStorage('plannerAbbreviations');
+          state.abbreviations = abbreviations && typeof abbreviations === 'object' && !Array.isArray(abbreviations) ? abbreviations : {};
+
+          state.moveEnd = readStorage('plannerMoveEnd') !== false;
+          state.moveStart = readStorage('plannerMoveStart') !== false;
+
           const start = moment.tz(params.get('date') || '', [DATE_FORMAT, 'YYYY-MM-DD'], true, referenceTimeZone());
           state.start = start.isValid() ? start.valueOf() : moment.tz(referenceTimeZone()).startOf('day').valueOf();
+
+          // Links only have an end when it isn't the usual 24 hours after the start
+          const end = moment.tz(params.get('end') || '', DATE_FORMAT, true, referenceTimeZone());
+          state.end = end.isValid() && end.valueOf() > state.start ? end.valueOf() : state.start + DAY_MS;
+          limitDuration('end');
         }
 
         function updateUrl() {
@@ -171,10 +199,11 @@
           const encode = (value) => encodeURIComponent(value).replace(/%2F/g, '/').replace(/%2C/g, ',').replace(/%3A/g, ':');
           const query = [
             'date=' + encode(startValue()),
+            state.end - state.start !== DAY_MS ? 'end=' + encode(localValue(state.end)) : null,
             'interval=' + state.interval,
             'tz=' + encode(state.timezones.join(',')),
             'full=' + encode(state.full.join(','))
-          ].join('&');
+          ].filter(Boolean).join('&');
           history.replaceState(null, '', '?' + query);
         }
 
@@ -189,6 +218,7 @@
         function render() {
           renderForm();
           renderDstWarning();
+          renderAbbreviationWarning();
           renderTable();
         }
 
@@ -199,13 +229,23 @@
             $('#start').val(startValue());
           }
           $('#interval').val(state.interval);
+
+          // The interval buttons only add something when the interval is under the hour button
+          $('.shift-interval').toggle(state.interval < 60).each(function () {
+            const sign = $(this).data('edge') === 'start' ? '-' : '+';
+            $(this).text(sign + state.interval + 'mins')
+              .attr('title', state.interval + ' minutes ' + (sign === '-' ? 'earlier' : 'later'));
+          });
+          $('#move-end').prop('checked', state.moveEnd);
+          $('#move-start').prop('checked', state.moveStart);
+          $('.shift-reset').toggle(state.end - state.start !== DAY_MS);
         }
 
-        // Warn about any UTC offset change within a week either side of the start
+        // Warn about any UTC offset change within a week either side of the times shown
         function renderDstWarning() {
           const from = state.start - WEEK_MS;
-          const to = state.start + WEEK_MS;
-          const end = state.start + 24 * HOUR_MS;
+          const to = state.end + WEEK_MS;
+          const end = state.end;
           let items = [];
 
           state.timezones.forEach((timezone) => {
@@ -230,10 +270,25 @@
           $('#dst-warning').toggle(items.length > 0).find('ul').html(items.join(''));
         }
 
+        // A timezone found by an abbreviation it isn't using on the start date, e.g. "PST" in summer
+        function renderAbbreviationWarning() {
+          let items = [];
+
+          state.timezones.forEach((timezone) => {
+            const abbr = state.abbreviations[timezone];
+            const note = abbr ? TimezoneSearch.abbreviationNote(timezone, abbr, state.start) : null;
+            if (note) {
+              items.push(`<li>${note} <button type="button" class="dismiss-note" data-timezone="${timezone}">Dismiss</button></li>`);
+            }
+          });
+
+          $('#abbr-warning').toggle(items.length > 0).find('ul').html(items.join(''));
+        }
+
         function renderTable() {
           hideTooltip(true);
 
-          const rows = 24 * 60 / state.interval;
+          const rows = Math.ceil((state.end - state.start) / (state.interval * 60 * 1000));
           const full = state.timezones.map((timezone) => state.full.includes(timezone));
 
           let head = state.timezones.map((timezone, index) => `
@@ -289,7 +344,9 @@
           if (!start.isValid()) {
             return;
           }
+          // A new start goes back to showing 24 hours
           state.start = start.valueOf();
+          state.end = state.start + DAY_MS;
           commit();
         }).on('blur', function () {
           this.value = startValue();
@@ -297,13 +354,68 @@
 
         $('#interval').on('change', function () {
           state.interval = Number(this.value);
+          // As does a new interval
+          state.end = state.start + DAY_MS;
           commit();
         });
 
-        $('.shift-btn').on('click', function () {
-          state.start += $(this).data('hours') * HOUR_MS;
+        // Top buttons move the start earlier, bottom ones the end later. With "move end"/"move start"
+        // ticked the other edge moves too, so the table scrolls; otherwise the table grows.
+        $('.shift-btn[data-unit]').on('click', function () {
+          const button = $(this);
+          const edge = button.data('edge');
+          const sign = edge === 'start' ? -1 : 1;
+          const unit = button.data('unit');
+          // Days keep the same local time across a clock change; minutes and hours are exact
+          const shift = (time) => unit === 'interval'
+            ? time + sign * state.interval * 60 * 1000
+            : moment.tz(time, referenceTimeZone()).add(sign, unit).valueOf();
+
+          if (edge === 'start') {
+            state.start = shift(state.start);
+            if (state.moveEnd) {
+              state.end = shift(state.end);
+            }
+          } else {
+            state.end = shift(state.end);
+            if (state.moveStart) {
+              state.start = shift(state.start);
+            }
+          }
+          limitDuration(edge === 'start' ? 'start' : 'end');
           commit();
         });
+
+        // Back to 24 hours, keeping this row's end of the table where it is
+        $('.shift-reset').on('click', function () {
+          if ($(this).data('edge') === 'start') {
+            state.end = state.start + DAY_MS;
+          } else {
+            state.start = state.end - DAY_MS;
+          }
+          commit();
+        });
+
+        $('#move-end').on('change', function () {
+          state.moveEnd = this.checked;
+          saveState();
+        });
+
+        $('#move-start').on('change', function () {
+          state.moveStart = this.checked;
+          saveState();
+        });
+
+        // Keep the table to at most a week, by pulling in the edge that wasn't just moved
+        function limitDuration(movedEdge) {
+          if (state.end - state.start > WEEK_MS) {
+            if (movedEdge === 'start') {
+              state.end = state.start + WEEK_MS;
+            } else {
+              state.start = state.end - WEEK_MS;
+            }
+          }
+        }
         /************** /Form **************/
 
         /************** Add / remove timezones **************/
@@ -325,6 +437,12 @@
           const timezone = state.timezones[$(this).closest('th').data('index')];
           state.timezones = state.timezones.filter((t) => t !== timezone);
           state.full = state.full.filter((t) => t !== timezone);
+          delete state.abbreviations[timezone];
+          commit();
+        });
+
+        $('#abbr-warning').on('click', '.dismiss-note', function () {
+          delete state.abbreviations[$(this).attr('data-timezone')];
           commit();
         });
 
@@ -386,42 +504,54 @@
         const popover = $('#timezone-popover');
         const select = $('#timezone-select');
 
-        moment.tz.names().forEach((timeZone) => {
-          select.append(`<option value="${timeZone}">${timeZone}</option>`)
-        });
-
-        select.select2({
+        // Searchable by city, state, country, abbreviation or offset (timezone-search.js)
+        TimezoneSearch.attach(select, {
           placeholder: "Search timezones",
           width: '100%',
-          dropdownParent: popover,
-          sorter: function (data) {
-            return data.sort(function (a, b) {
-              if (a.id === 'UTC') return -1;
-              if (b.id === 'UTC') return 1;
-              return a.text.localeCompare(b.text);
-            });
-          }
-        });
+          dropdownParent: popover
+        }, ['UTC']);
 
-        // The + button pops the select up underneath itself
+        // The + button pops the select up underneath itself, as wide as the table
+        function placePopover() {
+          const button = $('#add-btn');
+          const table = $('.table-wrapper');
+          popover.css({
+            width: table.outerWidth(),
+            top: button.offset().top + button.outerHeight() + 6,
+            left: table.offset().left
+          });
+        }
+
         $('#planner').on('click', '#add-btn', function () {
           if (popover.is(':visible')) {
             select.select2('close');
             return;
           }
 
-          const button = $(this);
-          const offset = button.offset();
           popover.show();
-          const maxLeft = $(window).scrollLeft() + $(window).width() - popover.outerWidth() - 5;
-          popover.css({
-            top: offset.top + button.outerHeight() + 6,
-            left: Math.max(5, Math.min(offset.left + button.outerWidth() - popover.outerWidth(), maxLeft))
-          });
+          placePopover();
           select.select2('open');
         });
 
-        select.on('select2:select', (e) => addTimeZone(e.params.data.id));
+        // Runs before Select2's own resize handler, so its dropdown follows the popover's new width
+        $(window).on('resize', () => {
+          if (popover.is(':visible')) {
+            placePopover();
+          }
+        });
+
+        select.on('select2:select', (e) => {
+          const timezone = normalizeTimeZone(e.params.data.id);
+          // Remember the abbreviation it was found by (e.g. PST) so we can say when the date doesn't match it
+          if (timezone && e.params.data.matchedAbbr) {
+            state.abbreviations[timezone] = e.params.data.matchedAbbr;
+          }
+          if (state.timezones.includes(timezone)) {
+            commit();
+          } else {
+            addTimeZone(timezone);
+          }
+        });
 
         select.on('select2:open', function () {
           setTimeout(function () {
@@ -711,11 +841,46 @@
             padding-left: 20px;
         }
 
-        /* Earlier / later buttons */
+        .dst-warning .dismiss-note {
+            padding: 0;
+            border: none;
+            background: none;
+            color: inherit;
+            font-family: inherit;
+            font-size: inherit;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        /* Earlier / later buttons, in a row above and below the table */
+        /* The 24hr reset, when showing, gets a line of its own on the side away from the table */
+        .shift-controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .shift-move {
+            flex: none;
+            margin: 0;
+            font-size: 14px;
+            font-weight: normal;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .shift-move input {
+            margin: 0 4px 0 0;
+            vertical-align: middle;
+        }
+
         .shift-btn {
-            display: block;
-            width: 100%;
-            padding: 6px;
+            flex: 1 1 0;
+            padding: 6px 2px;
+            /* Fixed so the ↺ (from a fallback font) doesn't make its button taller */
+            line-height: 18px;
+            white-space: nowrap;
             background-color: #f8f9fa;
             border: 1px solid #ddd;
             border-radius: 4px;
@@ -729,6 +894,18 @@
         .shift-btn:hover {
             border-color: #3498db;
             color: #3498db;
+        }
+
+        /* Fit "-30mins" etc. on the smallest phones */
+        @media (max-width: 400px) {
+            .shift-btn,
+            .shift-move {
+                font-size: 13px;
+            }
+        }
+
+        .shift-reset {
+            flex-basis: 100%;
         }
 
         /* Planner table */
@@ -885,12 +1062,12 @@
             vertical-align: -1px;
         }
 
-        /* Add timezone popover */
+        /* Add timezone popover; placePopover() makes it as wide as the table */
         .timezone-popover {
             display: none;
             position: absolute;
             z-index: 1000;
-            width: 300px;
+            box-sizing: border-box;
             max-width: calc(100vw - 30px);
             padding: 10px;
             background-color: white;
@@ -971,14 +1148,31 @@
             <strong>&#9888; Daylight Savings</strong>
             <ul></ul>
         </div>
+
+        <div id="abbr-warning" class="dst-warning">
+            <strong>&#9888; Timezone abbreviations</strong>
+            <ul></ul>
+        </div>
     </div>
 
     <div class="portlet">
-        <button type="button" class="shift-btn" data-hours="-6">&#9650; 6 hours earlier</button>
+        <div class="shift-controls">
+            <button type="button" class="shift-btn shift-reset" data-edge="start" title="Back to 24 hours from the start">&#8634; 24hr</button>
+            <button type="button" class="shift-btn shift-interval" data-edge="start" data-unit="interval"></button>
+            <button type="button" class="shift-btn" data-edge="start" data-unit="hours" title="1 hour earlier">-1hr</button>
+            <button type="button" class="shift-btn" data-edge="start" data-unit="days" title="1 day earlier">-1day</button>
+            <label class="shift-move" title="Untick to show more time instead of moving it"><input type="checkbox" id="move-end" checked>move end</label>
+        </div>
         <div class="table-wrapper">
             <table id="planner"></table>
         </div>
-        <button type="button" class="shift-btn" data-hours="6">&#9660; 6 hours later</button>
+        <div class="shift-controls">
+            <button type="button" class="shift-btn shift-interval" data-edge="end" data-unit="interval"></button>
+            <button type="button" class="shift-btn" data-edge="end" data-unit="hours" title="1 hour later">+1hr</button>
+            <button type="button" class="shift-btn" data-edge="end" data-unit="days" title="1 day later">+1day</button>
+            <label class="shift-move" title="Untick to show more time instead of moving it"><input type="checkbox" id="move-start" checked>move start</label>
+            <button type="button" class="shift-btn shift-reset" data-edge="end" title="Back to the 24 hours up to the end">&#8634; 24hr</button>
+        </div>
 
         <div class="legend">
             <span><i class="swatch day"></i>08:00&ndash;18:00</span>

@@ -1,0 +1,57 @@
+/* Results in the timezone pickers (timezone-search.js) */
+
+/* Name and offset on the first line, details underneath */
+.tz-option {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "name offset"
+        "detail detail";
+    align-items: baseline;
+    column-gap: 10px;
+}
+
+.tz-option-name {
+    grid-area: name;
+    overflow-wrap: anywhere;
+}
+
+.tz-option-offset {
+    grid-area: offset;
+    font-size: 12px;
+    opacity: 0.75;
+    white-space: nowrap;
+}
+
+.tz-option-detail {
+    grid-area: detail;
+    font-size: 12px;
+    line-height: 1.4;
+    opacity: 0.75;
+}
+
+/* Wide pickers (not the meeting planner's popover, or phones): all on one line */
+.select2-results__options {
+    container-type: inline-size;
+}
+
+@container (min-width: 600px) {
+    .tz-option {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-areas: "name detail offset";
+        column-gap: 12px;
+    }
+}
+
+/* Why it matched, when that isn't already on show, e.g. "California" */
+.tz-option-match {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 8px;
+    background-color: rgba(52, 152, 219, 0.15);
+    font-weight: 600;
+}
+
+.select2-results__option--highlighted .tz-option-match {
+    background-color: rgba(255, 255, 255, 0.25);
+}

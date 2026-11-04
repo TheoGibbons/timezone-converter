@@ -16,6 +16,9 @@
     <script src="libs/moment.min.js"></script>
     <script src="libs/moment-timezone-with-data.min.js"></script>
 
+    <link href="timezone-search.css" rel="stylesheet"/>
+    <script src="timezone-search.js"></script>
+
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {
@@ -172,7 +175,13 @@
             var datePretty = dateObj.tz(toTimezone).format("dddd, MMMM Do YYYY, h:mm:ss a | z (Z)");
 
             $(this).val(dateConverted);
-            $(this).closest('.single-holder').find('.datetime-pretty').html(datePretty);
+            const holder = $(this).closest('.single-holder');
+            holder.find('.datetime-pretty').html(datePretty);
+
+            // e.g. found by searching "PST" but the date is in summer, when it's on PDT
+            const abbr = searchedAbbreviations[toTimezone];
+            const note = abbr ? TimezoneSearch.abbreviationNote(toTimezone, abbr, dateObj.valueOf()) : null;
+            holder.find('.abbr-note').toggle(!!note).find('.abbr-note-text').html(note ? '&#9888; ' + note : '');
 
             // console.log(dateTime, dateObj, dateConverted);
 
@@ -184,20 +193,12 @@
         /************** /Update values **************/
 
         /************** SELECT2 **************/
-          // Setup select2
+          // Setup select2, searchable by city, state, country, abbreviation or offset (timezone-search.js)
         let select = $('#timezone-select');
-        select.select2({
+        TimezoneSearch.attach(select, {
           placeholder: "Select one",
-          allowClear: true,
-          sorter: function (data) {
-            return data.sort(function (a, b) {
-              const priority = ['UTC', 'unix', 'ago'];
-              if (priority.includes(a.id)) return -1;
-              if (priority.includes(b.id)) return 1;
-              return a.text.localeCompare(b.text);
-            });
-          }
-        });
+          allowClear: true
+        }, ['UTC', 'unix', 'ago']);
 
         $(document).on('select2:open', '#timezone-select', function() {
           setTimeout(function() {
@@ -214,14 +215,20 @@
         });
 
 
-        moment.tz.names().forEach((timeZone) => {
-          select.append(`<option value="${timeZone}">${timeZone}</option>`)
-        });
+        select.on('select2:select', function (e) {
+          const timezone = e.params.data.id;
+          const exists = $(`[data-timezone="${timezone}"]`).length > 0;
 
-        select.change(function () {
+          // Remember the abbreviation it was found by (e.g. PST) so we can say when the date doesn't match it
+          if (e.params.data.matchedAbbr) {
+            searchedAbbreviations[timezone] = e.params.data.matchedAbbr;
+            saveSearchedAbbreviations();
+          }
 
-          addTimeZone(this.value);
-
+          addTimeZone(timezone);
+          if (exists) {
+            $($('.timezone')[1]).change();
+          }
         });
         /************** /SELECT2 **************/
 
@@ -271,6 +278,7 @@
     <span class="delete-btn">&times;</span>
     <label for="${selctor}">${timezone}: <br class="hide-on-wide-screen"/><span class="datetime-pretty"></span></label>
     <input type="datetime-local" id="${selctor}" data-timezone="${timezone}" class="timezone">
+    <div class="abbr-note"><span class="abbr-note-text"></span><button type="button" class="dismiss-note" title="Dismiss">&times;</button></div>
 </div>
 `);
           }
@@ -283,8 +291,19 @@
         /************** Delete and Drag functionality **************/
         // Delete button functionality
         $('body').on('click', '.delete-btn', function() {
-          $(this).closest('.single-holder').remove();
+          const holder = $(this).closest('.single-holder');
+          delete searchedAbbreviations[holder.data('timezone')];
+          saveSearchedAbbreviations();
+          holder.remove();
           saveTimeZones();
+        });
+
+        // Dismissing an abbreviation note forgets the abbreviation for that timezone
+        $('body').on('click', '.dismiss-note', function() {
+          const holder = $(this).closest('.single-holder');
+          delete searchedAbbreviations[holder.data('timezone')];
+          saveSearchedAbbreviations();
+          holder.find('.abbr-note').hide();
         });
 
         // Make reorder buttons draggable
@@ -419,6 +438,22 @@
           let showInputs = localStorage.getItem('showInputs');
           return showInputs === null ? true : showInputs === 'true';
         }
+
+        // The abbreviation each timezone was found by, e.g. {"America/Los_Angeles": "PST"}
+        function loadSearchedAbbreviations() {
+          try {
+            const saved = JSON.parse(localStorage.getItem('searchedAbbreviations'));
+            return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+          } catch (e) {
+            return {};
+          }
+        }
+
+        function saveSearchedAbbreviations() {
+          localStorage.setItem('searchedAbbreviations', JSON.stringify(searchedAbbreviations));
+        }
+
+        let searchedAbbreviations = loadSearchedAbbreviations();
         /************** /LocalStorage functionality **************/
 
         /************** Show/Hide Inputs functionality **************/
@@ -620,6 +655,36 @@
         /* Ago display */
         #ago {
             padding: 8px 15px;
+        }
+
+        /* Searched abbreviation doesn't match the date, e.g. PST in summer */
+        .abbr-note {
+            display: none;
+            position: relative;
+            margin: -4px 0 10px;
+            padding: 6px 30px 6px 10px;
+            background-color: #fff3cd;
+            border-radius: 4px;
+            color: #856404;
+            font-size: 13px;
+        }
+
+        .abbr-note .dismiss-note {
+            position: absolute;
+            top: 2px;
+            right: 6px;
+            padding: 0;
+            border: none;
+            background: none;
+            color: inherit;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+            opacity: 0.6;
+        }
+
+        .abbr-note .dismiss-note:hover {
+            opacity: 1;
         }
 
         /* Responsive adjustments */
