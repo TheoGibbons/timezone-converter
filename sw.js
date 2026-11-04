@@ -1,6 +1,6 @@
 /* Service worker: precaches the whole app so it works fully offline. */
 // Set by .github/workflows/update-moment-timezone.yml, so new timezone data gets a fresh cache
-const TZ_VERSION = '0.6.5';
+const TZ_VERSION = '0.6.6';
 const CACHE_NAME = 'timezone-converter-v3-tz' + TZ_VERSION;
 
 const PRECACHE_URLS = [
