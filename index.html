@@ -142,31 +142,15 @@
         /************** Utils Functions **************/
 
         /************** Update values **************/
-        $('body').on('change', '.timezone', function () {
-          var dateObj
+        const URL_DATE_FORMATS = ['YYYY-MM-DDTHH:mm[Z]', 'YYYY-MM-DDTHH:mm:ss[Z]'];
 
-          if ($(this).is('#unix')) {
-            dateObj = moment.unix(this.value);
-          } else {
+        // The moment every row shows, as a unix timestamp in ms. Rows added later pick it up from here.
+        let shownTime = Date.now();
 
-            if (!this.value) {
+        function renderTimes() {
+          const dateObj = moment(shownTime);
 
-              var local = new Date();
-              local.setMinutes(local.getMinutes() - local.getTimezoneOffset());
-              this.value = local.toJSON().slice(0, 19)
-              console.log(local.toJSON().slice(0, 19));
-
-            }
-
-            var dateTime = this.value;
-            var fromTimezone = $(this).data('timezone');
-            dateObj = moment.tz(dateTime, fromTimezone);
-
-            $('#unix').val(dateObj.format('X'));
-
-          }
-
-          // console.log(this.value, dateObj);
+          $('#unix').val(dateObj.format('X'));
 
           $('.timezone').not('#unix').each(function () {
 
@@ -183,13 +167,50 @@
             const note = abbr ? TimezoneSearch.abbreviationNote(toTimezone, abbr, dateObj.valueOf()) : null;
             holder.find('.abbr-note').toggle(!!note).find('.abbr-note-text').html(note ? '&#9888; ' + note : '');
 
-            // console.log(dateTime, dateObj, dateConverted);
-
           })
 
           $('#ago').html(prettySeconds(dateObj.diff(moment(), 'seconds') * -1));
+        }
 
+        // No date in the URL means now, so opening or reloading a plain link is never out of date
+        function showNow() {
+          shownTime = Date.now();
+          history.replaceState(null, '', location.pathname);
+          renderTimes();
+        }
+
+        // A date picked by the user goes in the URL, in UTC, so the link can be shared
+        function showPickedTime(time) {
+          shownTime = time.valueOf();
+          const utc = moment.utc(shownTime);
+          history.replaceState(null, '', '?date=' + utc.format(URL_DATE_FORMATS[utc.seconds() ? 1 : 0]));
+          renderTimes();
+        }
+
+        function loadTimeFromUrl() {
+          const date = new URLSearchParams(location.search).get('date');
+          const time = moment.utc(date || '', URL_DATE_FORMATS, true);
+          if (time.isValid()) {
+            shownTime = time.valueOf();
+          }
+        }
+
+        $('body').on('change', '.timezone', function () {
+          if (!this.value) {
+            showNow();
+            return;
+          }
+
+          const time = $(this).is('#unix') ? moment.unix(this.value) : moment.tz(this.value, $(this).data('timezone'));
+          if (time.isValid()) {
+            showPickedTime(time);
+          } else {
+            // e.g. letters in the unix field: put the last good value back
+            renderTimes();
+          }
         })
+
+        $('#reset-now').on('click', showNow);
         /************** /Update values **************/
 
         /************** SELECT2 **************/
@@ -227,7 +248,7 @@
 
           addTimeZone(timezone);
           if (exists) {
-            $($('.timezone')[1]).change();
+            renderTimes();
           }
         });
         /************** /SELECT2 **************/
@@ -283,7 +304,7 @@
 `);
           }
 
-          $($('.timezone')[1]).change();
+          renderTimes();
           saveTimeZones();
         };
         /************** /Add timezone **************/
@@ -480,6 +501,8 @@
                 <option value="ago">Time Difference (ago)</option>
                 <option value="unix">Unix Timestamp</option>
             `);
+
+        loadTimeFromUrl();
 
         // Initialize with saved timezones or defaults
         let initTimeZones = loadTimeZones();
@@ -687,6 +710,26 @@
             opacity: 1;
         }
 
+        /* Reset to now */
+        #reset-now {
+            display: block;
+            margin-top: 5px;
+            padding: 6px 12px;
+            background-color: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            color: #2c3e50;
+            font-family: inherit;
+            font-size: 14px;
+            cursor: pointer;
+            transition: border-color 0.3s, color 0.3s;
+        }
+
+        #reset-now:hover {
+            border-color: #3498db;
+            color: #3498db;
+        }
+
         /* Responsive adjustments */
         @media (max-width: 768px) {
             body {
@@ -729,6 +772,7 @@
     <div class="portlet">
             <input type="checkbox" id="show-inputs" checked>
             <label for="show-inputs">Show inputs</label>
+            <button type="button" id="reset-now">Reset to now</button>
     </div>
 
 </form>

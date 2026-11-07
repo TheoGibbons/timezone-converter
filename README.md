@@ -9,6 +9,7 @@ It runs as a website and as an installable PWA that works offline.
 * Add and remove multiple timezones for comparison
 * Find timezones by city, US state, province, country, abbreviation (PST, NZDT, IST) or UTC offset (UTC-8). Abbreviations add the real zone (PST → America/Los_Angeles) so daylight saving is always right, with a heads-up when the date doesn't match the abbreviation you searched for (e.g. PST in July, when it's PDT)
 * Convert unix timestamps to readable dates and times
+* Share a moment by copying the URL: picking a date puts it in the link, in UTC (e.g. `?date=2026-11-06T03:30Z`), and "Reset to now" takes it back out
 * Visualize time differences in a human-readable format (e.g., "8 hrs 33 mins ago" or "in 6 hrs 26 mins")
 * Drag and reorder timezones for better organization
 * Local storage support to save users' timezone selections

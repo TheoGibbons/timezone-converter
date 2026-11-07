@@ -352,6 +352,15 @@
           this.value = startValue();
         });
 
+        // Now, rounded down to the interval so the table keeps to tidy times. The first row is the current one.
+        $('#start-now').on('click', function (e) {
+          e.preventDefault();
+          const now = moment.tz(referenceTimeZone()).startOf('minute');
+          state.start = now.subtract(now.minutes() % state.interval, 'minutes').valueOf();
+          state.end = state.start + DAY_MS;
+          commit();
+        });
+
         $('#interval').on('change', function () {
           state.interval = Number(this.value);
           // As does a new interval
@@ -824,6 +833,25 @@
             flex: 1 1 220px;
         }
 
+        /* Start's label, with the now link at the far end of it */
+        .control-heading {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+
+        .now-link {
+            flex: none;
+            margin-left: 10px;
+            color: #3498db;
+            font-size: 14px;
+            text-decoration: none;
+        }
+
+        .now-link:hover {
+            text-decoration: underline;
+        }
+
         /* Daylight saving warning */
         .dst-warning {
             display: none;
@@ -1129,7 +1157,10 @@
 
         <div class="controls">
             <div class="control">
-                <label for="start">Start (<span id="start-timezone"></span>):</label>
+                <div class="control-heading">
+                    <label for="start">Start (<span id="start-timezone"></span>):</label>
+                    <a href="#" id="start-now" class="now-link" title="Start from the current time">now</a>
+                </div>
                 <input type="datetime-local" id="start">
             </div>
             <div class="control">
